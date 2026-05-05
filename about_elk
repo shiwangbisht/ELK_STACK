@@ -1,0 +1,45 @@
+What is ELK Stack?
+ELK = Elasticsearch + Logstash + Kibana
+It's the world's most popular log management and analytics platform. 
+Originally built by Elastic, it solves the "needle in a haystack" problem of finding errors across thousands of servers.
+
+
+Why ELK over traditional logging?
+# Traditional (grep on 100 servers):
+ssh server01 "grep 'ERROR' /var/log/app.log"  # Takes hours
+
+# ELK way:
+# One Kibana query across ALL servers in < 1 second
+
+2. Core Components & Their Functions
+Elasticsearch (The Storage & Search Engine)
+Role: Distributed RESTful search and analytics engine.
+
+Key Concepts:
+
+Concept	    Analogy	        ELK Reality
+Index	    Database	    Container for similar logs (e.g., nginx-logs-2024.01.01)
+Shard	    Partition	    An index broken into pieces for horizontal scaling
+Replica	    Backup copy	    Prevents data loss if a node dies
+Document	Row/Record	    A single log entry (JSON format)
+Node	    Server	        One Elasticsearch instance
+
+
+Real Example:
+
+json
+// What Elasticsearch stores (one document)
+{
+  "_index": "leopay-prod-2026.05.04",
+  "_source": {
+    "@timestamp": "2026-05-04T10:30:15Z",
+    "service": "payment-gateway",
+    "level": "ERROR",
+    "message": "Transaction timeout for user_id 12345",
+    "response_time_ms": 30000
+  }
+}
+
+
+
+

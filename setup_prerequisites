@@ -1,0 +1,50 @@
+Requirements & Prerequisites
+
+Minimum Hardware (Development):
+Component	          CPU	        RAM	    Disk	    Notes
+Elasticsearch	    2 cores	        4GB	    20GB	    Must heap size 50% of RAM
+Logstash	        1 core	        2GB	    10GB	    Heap size depends on pipeline
+Kibana	            1 core	        1GB	    1GB	        Mostly static
+Filebeat	        0.5 core	    256MB	1GB	        Per application server
+
+Production Minimum (100GB logs/day):
+Component	          CPU	        RAM	    Disk	    Count
+Elasticsearch	    8 cores	        32GB	2TB SSD	    3 nodes minimum
+Logstash	        4 cores	        8GB	    100GB SSD   (for queue)	2 nodes (HA)
+Kibana	            2 cores	        2GB	    10GB	    1 + failover
+Load Balancer	    1 core	        1GB	    N/A	        For ES/Kibana
+
+Operating System Prerequisites (CRITICAL):
+bash
+# 1. Increase memory map count (or ES won't start)
+sudo sysctl -w vm.max_map_count=262144
+echo "vm.max_map_count=262144" >> /etc/sysctl.conf
+
+# 2. Increase file descriptors
+ulimit -n 65535
+echo "elasticsearch soft nofile 65535" >> /etc/security/limits.conf
+echo "elasticsearch hard nofile 65535" >> /etc/security/limits.conf
+
+# 3. Disable swapping (performance killer)
+sudo swapoff -a
+
+# 4. Increase process limit
+echo "elasticsearch soft nproc 4096" >> /etc/security/limits.conf
+
+# 5. TCP tuning for high throughput
+sysctl -w net.core.somaxconn=1024
+sysctl -w net.ipv4.tcp_max_syn_backlog=4096
+Software Prerequisites:
+Java: Elasticsearch requires Java 11-17 (OpenJDK)
+
+Docker (optional but common): Version 20.10+
+
+Ports:
+
+9200 (ES HTTP API)
+
+9300 (ES internal cluster)
+
+5044 (Filebeat → Logstash)
+
+5601 (Kibana web UI)

@@ -1,0 +1,66 @@
+Logstash (The Pipeline Processor)
+Role: Ingest, transform, and ship data.
+
+Three Pipeline Stages:
+
+text
+INPUT → FILTER → OUTPUT
+
+Input Examples:      Filter Examples:        Output Examples:
+- Filebeat (beats)   - grok (parse)         - Elasticsearch
+- Kafka              - mutate (modify)      - S3
+- HTTP               - date (timestamp)     - Slack
+- TCP/UDP            - geoip (location)     - Email
+Working Configuration Example:
+
+# logstash.conf
+input {
+  beats {
+    port => 5044
+    host => "0.0.0.0"
+  }
+}
+
+filter {
+  # Parse nginx logs like: 192.168.1.1 - - [04/May/2026:10:30:15] "GET /api"
+  grok {
+    match => { "message" => "%{IP:client_ip} - - \[%{HTTPDATE:timestamp}\] \"%{WORD:method} %{URIPATH:uri}\"" }
+  }
+  
+  # Convert response time string to integer
+  mutate {
+    convert => { "response_time" => "integer" }
+  }
+  
+  # Add geolocation from IP address
+  geoip {
+    source => "client_ip"
+  }
+}
+
+output {
+  elasticsearch {
+    hosts => ["localhost:9200"]
+    index => "weblogs-%{+YYYY.MM.dd}"
+  }
+  
+  # Write failed logs to dead letter queue
+  dead_letter_queue {
+    path => "/var/log/logstash/dlq"
+  }
+}
+
+
+The Queue System (Your Zero Data Loss Friend):
+
+Memory Queue (Default): Fast but data loss on crash
+
+Persistent Queue (Production): Writes to disk, survives restarts
+
+Queue Types:
+
+memory: Lossy, low latency
+
+persisted: Durable, medium latency
+
+none: No buffering (dangerous!)

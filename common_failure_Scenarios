@@ -1,0 +1,60 @@
+Common Failure Scenarios & Fixes
+
+
+-> Scenario 1: Elasticsearch Won't Start
+Error: bootstrap checks failed: max virtual memory areas vm.max_map_count [65530] is too low
+Fix: sudo sysctl -w vm.max_map_count=262144
+
+
+-> Scenario 2: Logstash Queue Fills Up
+Symptoms: High memory, slow ingestion, dropped logs
+Fix:
+
+yaml
+queue.max.bytes: 4096mb  # Increase from 2GB
+queue.max_events: 500000  # Cap events
+
+
+-> Scenario 3: Mapping Explosion (Too many fields)
+Error: Limit of total fields [1000] has been exceeded
+Fix:
+
+json
+PUT /logs-*/_settings
+{
+  "index.mapping.total_fields.limit": 2000
+}
+
+
+-> Scenario 4: Filebeat Duplicate Logs
+Cause: Registry file deleted or corrupted
+Fix:
+
+bash
+# Stop filebeat, find last log line
+tail -100 /var/log/app.log
+
+# Manually set registry position
+filebeat registry set /var/lib/filebeat/registry "last_offset: 1048576"
+
+
+
+->Scenario 5: Red Cluster Status
+bash
+# Find unassigned shards
+curl -X GET "localhost:9200/_cat/shards?h=index,shard,prirep,state,node&s=state"
+
+# Force allocate (temporary fix)
+curl -X POST "localhost:9200/_cluster/reroute" -H 'Content-Type: application/json' -d'
+{
+  "commands": [
+    {
+      "allocate_empty_primary": {
+        "index": "problem-index",
+        "shard": 0,
+        "node": "es02",
+        "accept_data_loss": false
+      }
+    }
+  ]
+}'

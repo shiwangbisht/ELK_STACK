@@ -1,0 +1,118 @@
+-> Step 1: Deploy Elasticsearch Cluster (3 nodes)
+Node 1 (docker-compose.yml):
+
+yaml
+version: '3.8'
+services:
+  es01:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: es01
+    environment:
+      - node.name=es01
+      - cluster.name=leopay-cluster
+      - discovery.seed_hosts=es02,es03
+      - cluster.initial_master_nodes=es01,es02,es03
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms8g -Xmx8g"
+      - network.publish_host=es01
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    volumes:
+      - esdata01:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - elk
+
+
+-> Verify cluster:
+
+bash
+curl -X GET "localhost:9200/_cluster/health?pretty"
+# Expected: "status" : "green", "number_of_nodes" : 3
+
+
+-> Step 2: Deploy Logstash
+yaml
+logstash:
+  image: docker.elastic.co/logstash/logstash:8.11.0
+  volumes:
+    - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml
+    - ./logstash/pipeline:/usr/share/logstash/pipeline
+    - logstash_queue:/usr/share/logstash/data  # Persistent queue
+  ports:
+    - "5044:5044"
+  environment:
+    LS_JAVA_OPTS: "-Xms2g -Xmx2g"
+logstash.yml (production):
+
+yaml
+pipeline.workers: 4
+pipeline.batch.size: 125
+pipeline.batch.delay: 50
+queue.type: persisted
+queue.max.bytes: 2048mb
+queue.checkpoint.interval: 1024
+
+
+
+-> Step 3: Deploy Kibana
+yaml
+kibana:
+  image: docker.elastic.co/kibana/kibana:8.11.0
+  environment:
+    - ELASTICSEARCH_HOSTS=["http://es01:9200","http://es02:9200","http://es03:9200"]
+    - SERVER_NAME=kibana.leopay.com
+  ports:
+    - "5601:5601"
+
+
+
+-> Step 4: Configure Filebeat on App Servers
+bash
+# Install Filebeat
+curl -L -O https://artifacts.elastic.co/downloads/beats/filebeat/filebeat-8.11.0-amd64.deb
+sudo dpkg -i filebeat-8.11.0-amd64.deb
+
+# Configure
+sudo vim /etc/filebeat/filebeat.yml
+
+# Start
+sudo systemctl enable filebeat
+sudo systemctl start filebeat
+
+-> # Verify
+sudo filebeat test output  # Should show "OK"
+
+
+
+-> Step 5: Create Index Lifecycle Policy
+json
+PUT _ilm/policy/leopay-30d-retention
+{
+  "policy": {
+    "phases": {
+      "hot": {
+        "actions": {
+          "rollover": {
+            "max_size": "50GB",
+            "max_age": "1d"
+          }
+        }
+      },
+      "warm": {
+        "min_age": "7d",
+        "actions": {
+          "shrink": {"number_of_shards": 1},
+          "forcemerge": {"max_num_segments": 1}
+        }
+      },
+      "delete": {
+        "min_age": "30d",
+        "actions": {"delete": {}}
+      }
+    }
+  }
+}
