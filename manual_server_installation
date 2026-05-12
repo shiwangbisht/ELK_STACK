@@ -1,0 +1,229 @@
+Here are all the commands to install the latest ELK stack on Ubuntu:
+
+🔧 Pre-flight (Do First)
+bash# Update system
+sudo apt-get update && sudo apt-get upgrade -y
+
+# Install dependencies
+sudo apt-get install -y apt-transport-https curl gnupg wget
+
+# CRITICAL — ES won't start without this
+sudo sysctl -w vm.max_map_count=262144
+echo 'vm.max_map_count=262144' | sudo tee -a /etc/sysctl.conf
+sysctl -p
+
+# Disable swap
+sudo swapoff -a
+sudo sed -i '/swap/d' /etc/fstab
+
+# Increase file descriptor limits
+echo 'elasticsearch soft nofile 65535' | sudo tee -a /etc/security/limits.conf
+echo 'elasticsearch hard nofile 65535' | sudo tee -a /etc/security/limits.conf
+
+📦 Add Elastic Repository
+bash# Import GPG key
+wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | \
+  sudo gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
+
+# Add 8.x repo
+echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] \
+  https://artifacts.elastic.co/packages/8.x/apt stable main" | \
+  sudo tee /etc/apt/sources.list.d/elastic-8.x.list
+
+# Update package list
+sudo apt-get update
+
+🔵 Elasticsearch
+bash# Install
+sudo apt-get install -y elasticsearch
+
+# ⚠️  SAVE the elastic password shown in install output!
+# If you missed it, reset it:
+sudo /usr/share/elasticsearch/bin/elasticsearch-reset-password -u elastic
+
+# Configure
+cluster.name: leopay-elk
+node.name: elk-node-1
+network.host: 0.0.0.0
+http.port: 9200
+discovery.type: single-node
+
+xpack.security.enabled: true
+xpack.security.http.ssl.enabled: true
+xpack.security.http.ssl.keystore.path: certs/http.p12
+xpack.security.transport.ssl.enabled: true
+xpack.security.transport.ssl.verification_mode: certificate
+xpack.security.transport.ssl.keystore.path: certs/transport.p12
+xpack.security.transport.ssl.truststore.path: certs/transport.p12
+
+# cluster.initial_master_nodes: ['elk-node-1']   ← REMOVE or comment this out
+
+# Start
+sudo systemctl daemon-reload
+sudo systemctl enable elasticsearch
+sudo systemctl start elasticsearch
+
+# Verify
+sudo systemctl status elasticsearch
+curl -k -u elastic:YOUR_PASSWORD https://localhost:9200
+curl -k -u elastic:YOUR_PASSWORD https://localhost:9200/_cluster/health?pretty
+
+🟣 Logstash
+bash# Install
+sudo apt-get install -y logstash
+
+# Create pipeline config
+sudo tee /etc/logstash/conf.d/main.conf << 'EOF'
+input {
+  beats {
+    port => 5044
+  }
+}
+
+filter {
+  mutate {
+    add_field => { "project" => "leopay" }
+  }
+}
+
+output {
+  elasticsearch {
+    hosts => ["https://localhost:9200"]
+    index => "leopay-%{+YYYY.MM.dd}"
+    user => "elastic"
+    password => "YOUR_ACTUAL_ELASTIC_PASSWORD"
+    ssl_enabled => true
+    ssl_verification_mode => "none"
+  }
+}
+EOF
+
+bash# Enable persistent queue (zero log loss)
+sudo nano /etc/logstash/logstash.yml
+# Add:
+# queue.type: persisted
+# queue.max_bytes: 4gb
+# allow_superuser: true
+
+# Test config
+sudo /usr/share/logstash/bin/logstash --config.test_and_exit \
+  -f /etc/logstash/conf.d/main.conf
+
+# Start
+sudo systemctl daemon-reload
+sudo systemctl enable logstash
+sudo systemctl start logstash
+
+# Verify (port 5044 listening)
+ss -tlnp | grep 5044
+curl http://localhost:9600/_node/stats/pipelines?pretty
+
+🟡 Kibana
+bash# Install
+sudo apt-get install -y kibana
+
+# Set kibana_system password
+sudo /usr/share/elasticsearch/bin/elasticsearch-reset-password -u kibana_system
+# Copy the generated password
+
+# Configure
+sudo bash -c 'cat > /etc/kibana/kibana.yml' << 'KIBANA_EOF'
+server.port: 5601
+server.host: "0.0.0.0"
+server.name: "leopay-kibana"
+elasticsearch.hosts: ["https://localhost:9200"]
+elasticsearch.username: "kibana_system"
+elasticsearch.password: "REPLACE_WITH_KIBANA_SYSTEM_PASSWORD"
+elasticsearch.ssl.verificationMode: none
+logging.root.level: info
+KIBANA_EOF
+
+bash# Start
+sudo systemctl daemon-reload
+sudo systemctl enable kibana
+sudo systemctl start kibana
+
+# Verify (takes ~60 seconds to start)
+sudo journalctl -u kibana -f
+curl -I http://localhost:5601
+# Open browser: http://YOUR_SERVER_IP:5601
+# Login: elastic / YOUR_ELASTIC_PASSWORD
+
+🟠 Filebeat (on App Servers)
+bash# Install (run this on every application server)
+wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | \
+  sudo gpg --dearmor -o /usr/share/keyrings/elasticsearch-keyring.gpg
+
+echo "deb [signed-by=/usr/share/keyrings/elasticsearch-keyring.gpg] \
+  https://artifacts.elastic.co/packages/8.x/apt stable main" | \
+  sudo tee /etc/apt/sources.list.d/elastic-8.x.list
+
+sudo apt-get update && sudo apt-get install -y filebeat
+
+# Configure
+sudo nano /etc/filebeat/filebeat.yml
+Paste this config:
+yamlfilebeat.inputs:
+  - type: log
+    enabled: true
+    paths:
+      - /var/log/myapp/*.log          # change to your log path
+    fields:
+      app: myapp                      # used for index name
+      env: production
+    fields_under_root: true
+    multiline.type: pattern
+    multiline.pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+    multiline.negate: true
+    multiline.match: after
+
+# Disk queue — buffers logs if Logstash is down
+queue.disk:
+  max_size: 10gb
+  flush.min_events: 1000
+  flush.timeout: 5s
+
+output.logstash:
+  hosts: ["ELK-SERVER-IP:5044"]      # replace with your ELK server IP
+  max_retries: -1                    # never drop logs
+
+logging.level: info
+bash# Test config and connectivity
+sudo filebeat test config
+sudo filebeat test output
+
+# Start
+sudo systemctl daemon-reload
+sudo systemctl enable filebeat
+sudo systemctl start filebeat
+
+# Verify — look for "Successfully published N events"
+sudo journalctl -u filebeat -f
+
+✅ Verify Everything is Working
+bash# All services running?
+sudo systemctl status elasticsearch logstash kibana filebeat
+
+# All ports listening?
+ss -tlnp | grep -E '9200|9300|5601|5044'
+
+# Indices created in ES?
+curl -k -u elastic:PASSWORD 'https://localhost:9200/_cat/indices?v'
+
+# Node health
+curl -k -u elastic:PASSWORD \
+  'https://localhost:9200/_cat/nodes?v&h=name,cpu,heap.percent,disk.used_percent'
+
+# Quick test — write a log, check it appears in ES
+echo "$(date -Iseconds) INFO Test log entry" >> /var/log/myapp/test.log
+sleep 10
+curl -k -u elastic:PASSWORD \
+  'https://localhost:9200/myapp-*/_search?q=Test+log&pretty'
+
+🔥 Open Firewall Ports
+bashsudo ufw allow 9200/tcp    # Elasticsearch
+sudo ufw allow 9300/tcp    # ES node-to-node
+sudo ufw allow 5601/tcp    # Kibana
+sudo ufw allow 5044/tcp    # Logstash Beats input
+sudo ufw reload
+sudo ufw status

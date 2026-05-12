@@ -42,4 +42,47 @@ json
 
 
 
+FLOW:
+Complete Data Flow
 
+[Application Server]                    [Central ELK Cluster]
+---------------------                    --------------------
+
+1. App writes log → /var/log/app.log
+                    ↓
+2. Filebeat detects change (inotify)
+   - Reads new lines
+   - Updates registry with offset
+                    ↓ (TCP 5044)
+3. Logstash receives via beats input
+   - Goes to persistent queue (disk)
+   - Pipeline processes batch
+     • Grok parsing
+     • Mutate fields  
+     • GeoIP enrichment
+                   ↓ (HTTP 9200)
+4. Elasticsearch indexes
+   - Routes to correct shard (hash based on _id)
+   - Creates inverted index
+   - Replicates to replica shards
+                   ↓ (HTTP 5601)
+5. Kibana queries via browser
+   - User searches "ERROR"
+   - Translates to ES REST API
+   - Renders results
+
+Actual Network Flow Example:
+
+# On log generation (server side):
+echo "2026-05-04 10:30:15 ERROR Payment failed" >> /var/log/payment.log
+
+# What happens:
+1. Kernel inotify tells Filebeat: file changed
+2. Filebeat reads line → JSON wrapper:
+   {"@timestamp":"2026-05-04T10:30:15Z","message":"Payment failed","service":"payment"}
+3. TCP packet to Logstash:5044
+4. Logstash acknowledges (ACK) - Filebeat can now remove from queue
+5. Logstash transforms (grok, date, mutate)
+6. HTTP POST to Elasticsearch:9200/_bulk
+7. ES returns 201 Created
+8. Kibana user sees it in < 1 second

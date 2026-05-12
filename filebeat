@@ -40,6 +40,7 @@ output.logstash:
 
 # No data loss during shutdown
 shutdown_timeout: 30s
+
 Filebeat Registry (Critical for "No Duplicates"):
 Filebeat keeps a registry file that stores the last read position of every log file.
 

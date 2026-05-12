@@ -1,0 +1,32 @@
+# First, just see what needs to be fixed without making changes
+echo "=== ANALYZING UNASSIGNED INDICES ==="
+curl -k -u elastic:ydjkqbrIi3uCf9+aWfwk -s "https://localhost:9200/_cat/shards/leopay-*" | \
+grep UNASSIGNED | awk '{print $1}' | sort -u > /tmp/unassigned_list.txt
+
+TOTAL=$(cat /tmp/unassigned_list.txt | wc -l)
+echo "Found $TOTAL indices with unassigned shards"
+echo ""
+echo "These indices will be fixed:"
+cat /tmp/unassigned_list.txt
+
+# TEST: Fix just ONE index first
+TEST_INDEX=$(head -1 /tmp/unassigned_list.txt)
+echo "Testing with index: $TEST_INDEX"
+
+# Close the index first (safer than delete)
+curl -k -u elastic:ydjkqbrIi3uCf9+aWfwk -X POST "https://localhost:9200/$TEST_INDEX/_close"
+
+# Restore from snapshot (this will add missing documents)
+curl -k -u elastic:ydjkqbrIi3uCf9+aWfwk -X POST "https://localhost:9200/_snapshot/leopay_backup/final_combined_backup/_restore" \
+-H 'Content-Type: application/json' \
+-d "{
+  \"indices\": \"$TEST_INDEX\",
+  \"ignore_unavailable\": true,
+  \"include_global_state\": false
+}"
+
+# Open the index
+curl -k -u elastic:ydjkqbrIi3uCf9+aWfwk -X POST "https://localhost:9200/$TEST_INDEX/_open"
+
+# Verify the index is now green
+curl -k -u elastic:ydjkqbrIi3uCf9+aWfwk "https://localhost:9200/_cat/indices/$TEST_INDEX?v"

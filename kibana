@@ -1,0 +1,28 @@
+Kibana (The Visualization Layer)
+Role: Web UI for searching, visualizing, and dashboarding.
+
+Key Features:
+
+Discover - Query logs with Lucene or KQL syntax
+
+Visualize - Create charts (bar, line, pie, maps)
+
+Dashboard - Combine visualizations
+
+Maps - Geospatial analysis (show attacks by country)
+
+Machine Learning - Anomaly detection (paying feature)
+
+Alerting - Trigger actions on conditions
+
+KQL Query Examples:
+
+kql
+# Find all payment errors
+service:"payment-gateway" AND level:ERROR
+
+# Find slow responses (> 5 seconds)
+response_time > 5000
+
+# Exclude health checks
+NOT message:"/health"
